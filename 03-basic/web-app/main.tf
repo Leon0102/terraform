@@ -23,10 +23,6 @@ provider "aws" {
 
 
 # EC2
-resource "aws_security_group" "instances" {
-  name = "instance-security-group"
-}
-
 resource "aws_instance" "instance-1" {
   ami = "ami-0f74c08b8b5effa56" #Ubuntu Server 20.04 LTS (HVM), SSD Volume Type
   instance_type = "t2.micro"
@@ -53,18 +49,24 @@ resource "aws_instance" "instance-2" {
 resource "aws_s3_bucket" "bucket" {
   bucket = "leon-nguyen-terrafrom-test-state"
   force_destroy = true
-  versioning {
-    enabled = true
-  }
+}
 
-   server_side_encryption_configuration {
-    rule {
-      apply_server_side_encryption_by_default {
-        sse_algorithm = "AES256"
-      }
+resource "aws_s3_bucket_versioning" "bucket_versioning" {
+  bucket = aws_s3_bucket.bucket.id
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "bucket_crypto_conf" {
+  bucket = aws_s3_bucket.bucket.bucket
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
     }
   }
 }
+
 
 data "aws_vpc" "default_vpc"{
   default = true
@@ -72,6 +74,10 @@ data "aws_vpc" "default_vpc"{
 
 data "aws_subnet_ids" "default_subnet"{
   vpc_id = data.aws_vpc.default_vpc.id
+}
+
+resource "aws_security_group" "instances" {
+  name = "instance-security-group"
 }
 
 resource "aws_security_group_rule" "allow_http_inbound" {
@@ -109,12 +115,24 @@ resource "aws_lb_target_group" "instance" {
   health_check {
     path = "/"
     protocol = "HTTP"
-    matcher = 200
+    matcher = "200"
     interval = 15
     timeout = 3
     healthy_threshold = 2
     unhealthy_threshold = 2
   }
+}
+
+resource "aws_lb_target_group_attachment" "instance_1" {
+  target_group_arn = aws_lb_target_group.instance.arn
+  target_id        = aws_instance.instance-1.id
+  port             = 8080
+}
+
+resource "aws_lb_target_group_attachment" "instance_2" {
+  target_group_arn = aws_lb_target_group.instance.arn
+  target_id        = aws_instance.instance-2.id
+  port             = 8080
 }
 
 resource "aws_lb_listener_rule" "instances" {
@@ -143,7 +161,7 @@ resource "aws_security_group_rule" "allow_alb_http_inbound" {
 
   from_port = 80
   to_port = 80
-  protocol = "HTTP"
+  protocol = "tcp"
   cidr_blocks = ["0.0.0.0/0"]
 }
 
@@ -151,9 +169,9 @@ resource "aws_security_group_rule" "allow_alb_http_outbound" {
   type = "egress"
   security_group_id = aws_security_group.alb.id
 
-  from_port = 80
-  to_port = 80
-  protocol = "HTTP"
+  from_port = 0
+  to_port = 0
+  protocol = "-1"
   cidr_blocks = ["0.0.0.0/0"]
 }
 
@@ -182,11 +200,12 @@ resource "aws_route53_record" "root" {
 
 resource "aws_db_instance" "db_instance" {
   allocated_storage  = 20
+  auto_minor_version_upgrade = true
   storage_type = "standard"
   engine = "postgres"
-  engine_version = "12.5"
+  engine_version = "12"
   instance_class = "db.t2.micro"
-  name = "web-app-db"
+  name = "webdb"
   username = "postgres"
   password = "postgres"
   skip_final_snapshot = true
